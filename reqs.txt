@@ -1,0 +1,37 @@
+
+0. Run "none" model for all descriptions in current properties file (see the number of null)
+
+In loop
+1. Read properties file 
+2. Take uncleaned address fields from 1 row & combine/clean (store entire row in cache)
+3. Take that cleaned address and search on bing
+4. Open each bing listing from bing search resuls
+5. Take each listing's page & remove all html (left with just text)
+6. Summarize all the text from 1 listing into 1 paragraph (if similarity is there - same listing), and append to extra field in the same row
+7. Run "none" model for all descriptions+extra appended field (from webpages) in current properties file (see the number of null)
+
+numerical_sentence = [raw_sentence[j]] 
+    for j in raw_sentence[j]:
+            numerical_sentence.replace('[]\'', '')
+            numerical_sentence = j
+       
+		   
+**********************
+Algorithm - Real State
+**********************
+Laod Model
+Open Properties Data in DF5
+Craete a Header with New Fields (Record_No, Clean_Desc, Clean_Address, Added_Desc
+Craete New DF6 with New Fields
+Clean Columns of DF5 and Replace Text
+Read DF6 Rwo By Row
+	Read Desc and Predict the Model for None Label
+	If Probalaity is High
+		Read Clean Address
+		Open this address with Bing Serach
+		Read Each Sub-Links
+			Store Text Infomation in a string
+			Clean String
+			For Selected Feilds in DF6
+				Check if Fields are in Text
+					Add HREF and Text in DF6
