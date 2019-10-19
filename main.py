@@ -1,9 +1,7 @@
-from cleaner import Address_Cleaning_Module, Prop_Desc_Cleaner, One_Line_Address, CA_PostCode_Validator
-from keras.preprocessing.sequence import pad_sequences
-import pandas as pd, numpy as np, re, csv#, sqlite3
-from keras.preprocessing.text import Tokenizer
-import requests, warnings, html2text
-from keras.models import load_model
+from cleaner import Address_Cleaning_Module, One_Line_Address, CA_PostCode_Validator#, Prop_Desc_Cleaner
+import pandas as pd, re, csv, itertools, requests, warnings, html2text#, sqlite3
+import dateutil.parser as dparser
+from email.utils import parseaddr
 from tr4w import TextRank4Keyword
 from bs4 import BeautifulSoup
 
@@ -21,8 +19,6 @@ wordDic = {'City of': '', 'Own': '', 'own': '', 'Com':'', 'com':'', '<br />':'',
             'Quebec': 'QC', 'Saskatchewan': 'SK', 'Yukon': 'YT'
             } # The dictionary has target_word : replacement_word pairs
 
-model = load_model("none_model.hdf5")
-
 '''
 conn = sqlite3.connect("properties_db.sqlite3")
 c = conn.cursor()
@@ -31,6 +27,15 @@ c.execute("""
           """)
 '''
 
+with open("properties_new_rawinfo.csv", "a+", newline="", encoding="utf-8") as fp:
+    csv.writer(fp).writerow(['Record_No', 'Raw_Important_Extracted_Info', 'Sublinks'])
+            
+with open("properties_new_clean.csv", "a+", newline="", encoding="utf-8") as fp:
+    csv.writer(fp).writerow(['Record_No', 'Clean_Address', 'Description', 'Vacancy_Space', 'Acreage', 
+                             'Space_Type', 'Rent', 'CAM_Tax', 'Total_Price', 'Sale_Or_Lease', 
+                             'Class', 'Status', 'Availability', 'Email', 'Phone_Number', 
+                             'Owner_Name', 'Tenants', 'Listing_Links', 'Summarized_Abstractive_Idea'])
+    
 df = pd.read_csv('properties.csv', encoding="ISO-8859-1")
 df = df.rename(columns={'address':'Bldg','address: Street 1':'Street','location':'City', 'address: State':'State','address: Zip':'Zip', 'description' : 'Desc'})
 
@@ -44,12 +49,7 @@ for index, row in df.iterrows():
     
     df['Zip'][index] = CA_PostCode_Validator(row['Zip'])
     record = Address_Cleaning_Module(header, record, wordDic); record = One_Line_Address(record, header2)[0]
-    record['Clean_Desc'] = Prop_Desc_Cleaner(record)
-        
-    numerical_sentence = record['Clean_Desc'].tolist()
-    t = Tokenizer(); t.fit_on_texts(numerical_sentence[0])
-    numerical_sentence = pad_sequences(sequences=t.texts_to_sequences(numerical_sentence[0]), maxlen=500)
-    none_preds = np.array(model.predict(numerical_sentence)).flatten()
+    #record['Clean_Desc'] = Prop_Desc_Cleaner(record)
                 
     summaries, sub_links = [], []
     
@@ -81,12 +81,12 @@ for index, row in df.iterrows():
                          r_i['sales_price'], r_i['price'], r_i['cam_tax'], r_i['total_additional_rent'], 
                          r_i['operating_costs'], r_i['contact'], r_i['phone'], r_i['email'],
                          r_i['owner'], r_i['owner: First'], r_i['owner: Last'], r_i['tenants'], 
-                         r_i['Clean_Address'], r_i['Clean_Desc'][0]]
+                         r_i['Clean_Address'], r_i['Desc'][0]]
             for element in record_df: [ record_to_compare.append(e) for e in str(element).split(" ") ]
             record_to_compare = [x for x in record_to_compare if x != 'nan']
 
             text_scraped = list(filter(lambda a: a != "", txt.split(" ")))
-            text_scraped = [ re.sub(r'\B(?=[A-Z])', r' ', re.sub('[^A-Za-z0-9\- .+$()]', '', e)) for e in text_scraped ]
+            text_scraped = [ re.sub(r'\B(?=[A-Z])', r' ', re.sub('[^A-Za-z0-9/\- @.+$()]', '', e)) for e in text_scraped ]
             for element in text_scraped: [ txt_to_compare.append(e) for e in str(element).split(" ") ]
             txt_to_compare = [x for x in txt_to_compare if x != '' and x != '\n']
             
@@ -118,8 +118,65 @@ for index, row in df.iterrows():
     if sub_links != []:
             
         r_i = record.iloc[0]; 
-        with open("properties_extra.csv", "a+", newline="", encoding="utf-8") as fp:
+        with open("properties_new_rawinfo.csv", "a+", newline="", encoding="utf-8") as fp:
             csv.writer(fp).writerow([r_i['Record_No'], summaries, sub_links])
+        
+        #not able to recognize tenants, owner name
+        vac_space, acreage, space_type, rent, cam_tax, price, sale_or_lease, class_str, status, availability, email, phone_number = "", "", "", "", "", "", "", "", "", "", "", ""
+        for word in list(itertools.chain.from_iterable(summaries)):
+            if vac_space == "": vac_space = word if any(substring in word.lower() for substring in ["square", "sq", "feet", "ft", "meter"]) and any(i.isdigit() for i in word) else ""
+            if acreage == "": acreage = word if any(substring in word.lower() for substring in ["acre", "ac", "hectare", "ha"]) and any(i.isdigit() for i in word) else ""
+            if space_type == "": 
+                if word.lower().find("office") != -1: space_type = "Office"
+                if word.lower().find("retail") != -1: space_type = "Retail"
+                if word.lower().find("industrial") != -1: space_type = "Industrial"
+                if word.lower().find("land") != -1: space_type = "Land"
+                if word.lower().find("multifamily") != -1: space_type = "Multifamily"
+            if rent == "": rent = word if re.search("$.*/", word.lower()) and any(substring in word.lower() for substring in ["year", "yr", "month", "mo"]) else ""
+            if cam_tax == "": cam_tax = word if re.search("$.*/.*sq", word.lower()) and any(substring in word.lower() for substring in ["year", "yr", "month", "mo"]) else ""
+            if price == "": price = word if re.search(r'[$]\d{5}', word) else ""
+            if sale_or_lease == "": 
+                if word.lower().find("sale") != -1: sale_or_lease = "Sale"
+                if word.lower().find("lease") != -1: sale_or_lease = "Lease"
+            if class_str == "": 
+                if word.upper() == "A": class_str = "A"
+                if word.upper() == "B": class_str = "B"
+                if word.upper() == "C": class_str = "C"
+            if status == "": 
+                if word.lower().find("existing") != -1: status = "Existing"
+                if word.lower().find("firmly proposed") != -1: status = "Firmly Proposed"
+                if word.lower().find("under construction") != -1: status = "Under Construction"
+                if word.lower().find("previously owned") != -1: status = "Previously Owned"
+                if word.lower().find("retrofit") != -1: status = "Retrofit"
+            if availability == "": 
+                if word.lower().find("immediately") != -1: availability = "Immediately"
+                try: availability = dparser.parse(word, fuzzy=True).strftime('%m/%d/%Y')
+                except: pass
+            if email == "": email = parseaddr(word.lower())[1] if '@' in parseaddr(word.lower())[1] and '.' in parseaddr(word.lower())[1] else ""
+            if phone_number == "": 
+                try: phone_number = re.findall(r'[\+\(]?[1-9][0-9 .\-\(\)]{8,}[0-9]', word.lower())[0]
+                except: pass
+                
+        if vac_space == "": vac_space = r_i['vac_space']
+        if acreage == "": acreage = r_i['acreage']
+        if space_type == "": space_type = r_i['type']
+        if rent == "": rent = r_i['net_rent']
+        if cam_tax == "": cam_tax = r_i['cam_tax']
+        if price == "": price = r_i['price']
+        if sale_or_lease == "": sale_or_lease = r_i['for_sale_or_lease']
+        if class_str == "": class_str = r_i['class']
+        if status == "": status = r_i['status']
+        if availability == "": availability = r_i['availability']
+        if email == "": email = r_i['email']
+        if phone_number == "": phone_number = r_i['phone']
+        owner = r_i['owner']; tenants = r_i['tenants']
+        listing_links = sub_links; abstractive_idea = "*TO DO*"
+        
+        with open("properties_new_clean.csv", "a+", newline="", encoding="utf-8") as fp:
+            csv.writer(fp).writerow([r_i['Record_No'], r_i['Clean_Address'], r_i['Desc'], 
+                                     vac_space, acreage, space_type, rent, cam_tax, price, 
+                                     sale_or_lease, class_str, status, availability, email, 
+                                     phone_number, owner, tenants, listing_links, abstractive_idea])
         
         '''
         conn = sqlite3.connect("properties_db.sqlite3")

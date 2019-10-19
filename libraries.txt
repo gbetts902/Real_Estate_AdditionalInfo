@@ -1,0 +1,14 @@
+numpy
+pandas
+re
+csv
+itertools
+requests
+warnings
+html2text
+dateutil
+email
+bs4
+collections
+spacy
+nltk
